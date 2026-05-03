@@ -19,7 +19,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+# ✅ টোকেন শুধু এনভায়রনমেন্ট ভেরিয়েবল থেকে নিবে (Render-এ সেট করতে হবে)
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set!")
+
 PORT = int(os.environ.get("PORT", 8080))
 
 app = Flask(__name__)
@@ -237,7 +241,7 @@ class CardGenerator:
         self._is_updating = False
         print(f"Cards generated: {len(self.cards)} cards")
 
-    def mark_random_cards_out_of_stock(self, percentage: float = 3.0):
+    def mark_random_cards_out_of_stock(self, percentage: float = 1.0):
         available_cards = [c for c in self.cards if not c.is_out_of_stock]
         if not available_cards:
             return 0
@@ -279,16 +283,19 @@ class UserManager:
         self.users: Dict[int, UserData] = {}
         self.order_counter = 20990
 
-    def get_or_create_user(self, update: Update) -> UserData:
+    def get_or_create_user(self, update: Update, referrer_id: Optional[int] = None) -> UserData:
         user = update.effective_user
         if user.id not in self.users:
-            referral_link = f"https://t.me/YourBotUsername?start=ref_{user.id}"
+            referral_link = f"https://t.me/Vanilla_cards_bot?start=ref_{user.id}"
             self.users[user.id] = UserData(
                 user_id=user.id,
                 username=user.username or "",
                 first_name=user.first_name,
                 referral_link=referral_link
             )
+            if referrer_id and referrer_id != user.id and referrer_id in self.users:
+                self.users[user.id].referred_by = str(referrer_id)
+                self.users[referrer_id].referrals_count += 1
         return self.users[user.id]
 
     def get_next_order_number(self) -> int:
@@ -305,8 +312,9 @@ class KeyboardBuilder:
             [
                 InlineKeyboardButton("💳 Stock", callback_data="stock"),
                 InlineKeyboardButton("📞 Contact Admin", url="https://t.me/Vanilagcm"),
-                InlineKeyboardButton("🔍Card chake", url="https://t.me/card_chaker_bot")
-            ]
+                InlineKeyboardButton("🔍 Card chake", url="https://t.me/card_chaker_bot")
+            ],
+            [InlineKeyboardButton("🆘 Refund support", url="https://t.me/VANILAExchange")]
         ]
         return InlineKeyboardMarkup(keyboard)
 
@@ -325,8 +333,7 @@ class KeyboardBuilder:
     def get_deposit_keyboard() -> InlineKeyboardMarkup:
         keyboard = [
             [InlineKeyboardButton("Confirm ✅", callback_data="deposit_confirm")],
-            [InlineKeyboardButton("Cancel ⛔", callback_data="deposit_cancel")],
-            [InlineKeyboardButton("✆ Contact", url="https://t.me/Vanilagcm")]
+            [InlineKeyboardButton("Cancel ⛔", callback_data="deposit_cancel")]
         ]
         return InlineKeyboardMarkup(keyboard)
 
@@ -350,7 +357,15 @@ async def is_update_time() -> bool:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = user_manager.get_or_create_user(update)
+    referrer_id = None
+    if context.args and context.args[0].startswith("ref_"):
+        try:
+            referrer_id = int(context.args[0][4:])
+        except ValueError:
+            pass
+
+    user = user_manager.get_or_create_user(update, referrer_id)
+
     welcome_text = (
         f"⚡️Welcome {user.first_name} to Vanilla prepaid! ⚡️\n\n"
         "Sell, Buy, and strike deals in seconds!!\n"
@@ -446,7 +461,6 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_address = random.choice(DEPOSIT_ADDRESSES)
-
     user_id = update.effective_user.id
     user_deposit_data[user_id] = {
         'address': selected_address,
@@ -456,8 +470,8 @@ async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     message = (
-        f"⚡ Vanilla prepaid — TON DEPOSIT ⚡\n\n\n\n"
-        f"Deposit Information: `{selected_address}`\n\n\n\n"
+        f"⚡ Vanilla prepaid — TON DEPOSIT ⚡\n\n"
+        f"Deposit Information: `{selected_address}`\n\n"
         "Minimum Deposit: `15 TON`\n"
         "Instructions:\n"
         "1. Send your deposit to the address above.\n"
@@ -486,7 +500,8 @@ async def deposit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def deposit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Deposit request has been canceled.❌\nYou can now create a new deposit request.✅")
+    await query.delete_message()
+    await update.effective_chat.send_message("Deposit request has been canceled.❌\nYou can now create a new deposit request.✅")
     context.user_data.pop('awaiting_deposit_amount', None)
     context.user_data.pop('awaiting_txid', None)
 
@@ -518,16 +533,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deposit_data = user_deposit_data.get(user_id, {})
         amount = deposit_data.get('amount', 0)
         order_number = user_manager.get_next_order_number()
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         context.user_data['awaiting_txid'] = False
 
         order_text = (
-            f"NAME: `{user.first_name}`\n\n"
+            f"⚡ ORDER DETAILS ⚡\n\n"
+            f"NAME: `{user.first_name}`\n"
+            f"ID: `{user.user_id}`\n"
             f"AMOUNT: `{amount}` TON\n"
             f"Txid: `{txid}`\n"
             f"Order Number: `{order_number}`\n"
             f"Stats: Waiting...\n"
-            f"TIME: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n\n"
+            f"TIME: `{current_time}`\n\n"
             "NOTE: Balance will be added within 1/2 minutes. If not added, contact customer care."
         )
 
@@ -536,35 +554,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         message = await update.message.reply_text(order_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-        asyncio.create_task(simulate_transaction_check(context, message.chat_id, message.message_id, order_text))
+        asyncio.create_task(update_order_status(context, message.chat_id, message.message_id, order_text))
 
 
-async def simulate_transaction_check(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, original_text: str):
+async def update_order_status(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, original_text: str):
     await asyncio.sleep(50)
-
     processing_text = original_text.replace("Stats: Waiting...", "Stats: Processing....")
     try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=processing_text,
-            parse_mode='Markdown'
-        )
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=processing_text, parse_mode='Markdown')
     except Exception as e:
-        logger.error(f"Error editing message: {e}")
+        logger.error(f"Error editing message to Processing: {e}")
 
     await asyncio.sleep(55)
-
     failed_text = processing_text.replace("Stats: Processing....", "Stats: transaction could not be found.")
     try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=failed_text,
-            parse_mode='Markdown'
-        )
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=failed_text, parse_mode='Markdown')
     except Exception as e:
-        logger.error(f"Error editing message: {e}")
+        logger.error(f"Error editing message to failed: {e}")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -666,7 +672,7 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Last Cards:\n  {last_cards_text}\n\n"
         f"👥 Referrals\n"
         f"• Invited: {user.referrals_count}\n"
-        f"• Referred By: {user.referral_link}\n\n"
+        f"• Referred By: {user.referred_by}\n\n"
         f"🛠 Permissions\n"
         f"• Vendor: ❌\n"
         f"• Re-list: ❌\n\n"
@@ -747,7 +753,7 @@ async def scheduled_update(context: ContextTypes.DEFAULT_TYPE):
 async def auto_mark_out_of_stock(context: ContextTypes.DEFAULT_TYPE):
     if not card_generator.cards:
         return
-    count = card_generator.mark_random_cards_out_of_stock(3.0)
+    count = card_generator.mark_random_cards_out_of_stock(1.0)
     if count and count > 0:
         print(f"Auto OUT OF STOCK: {count} cards marked at {datetime.now()}")
 
@@ -775,9 +781,9 @@ async def main():
     application.add_handler(CallbackQueryHandler(handle_callback))
 
     if application.job_queue:
-        interval = random.randint(1800, 3600)
+        interval = 3600
         application.job_queue.run_repeating(auto_mark_out_of_stock, interval=interval, first=interval)
-        print(f"Auto OUT OF STOCK scheduled every {interval // 60} minutes")
+        print(f"Auto OUT OF STOCK scheduled every {interval // 60} minutes (1% per hour)")
         application.job_queue.run_daily(scheduled_update, time=time(hour=3, minute=0, second=0))
 
     print("Starting polling...")
