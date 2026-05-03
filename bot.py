@@ -19,10 +19,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ✅ টোকেন শুধু এনভায়রনমেন্ট ভেরিয়েবল থেকে নিবে (Render-এ সেট করতে হবে)
+# টোকেন এনভায়রনমেন্ট ভেরিয়েবল থেকে নিবে
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable is not set!")
+    logger.error("BOT_TOKEN environment variable is not set!")
+    # ডামি টোকেন সেট করা হচ্ছে যাতে বোট ক্র্যাশ না করে (Render-এ দেখানোর জন্য)
+    BOT_TOKEN = "DUMMY_TOKEN_FOR_RENDER"
 
 PORT = int(os.environ.get("PORT", 8080))
 
@@ -250,7 +252,7 @@ class CardGenerator:
         selected = random.sample(available_cards, count)
         for card in selected:
             card.is_out_of_stock = True
-        print(f"Marked {count} cards as OUT OF STOCK (Total OUT OF STOCK: {len([c for c in self.cards if c.is_out_of_stock])})")
+        print(f"Marked {count} cards as OUT OF STOCK")
         return count
 
     def get_cards_paginated(self, page: int, per_page: int = 10, filter_type: str = None) -> Tuple[List[Card], int]:
@@ -407,7 +409,7 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     message_text = "⚡️ Vanilla prepaid - Main Listings V2 ⚡️\n\n"
     message_text += "Your Balance:\n"
     message_text += f"💵 USD: ${user.usd_balance:.2f}\n"
-    message_text += f"• TON : {user.ton_balance:.6f} (${user.ton_balance * 2:.2f})\n\n"
+    message_text += f"• TON : {user.ton_balance:.6f}\n\n"
 
     for i, card in enumerate(cards, 1):
         message_text += f"{i}. {card.card_number} {card.currency}${card.amount:.2f} at 37%"
@@ -419,7 +421,7 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     message_text += f"\nTotal Cards: {len(cards)} | Total Cards Balance: ${total_balance:.2f}\n"
     message_text += "Legend:\n🔄 = Re-listed\n🅶 = Used on Google\n🅿 = Used on PayPal\n\n"
     message_text += f"Filters: {filter_type or 'None'} \n"
-    message_text += f"Page: {page}/{total_pages} | Updated: {datetime.now().strftime('%H:%M:%S')}"
+    message_text += f"Page: {page}/{total_pages}"
 
     keyboard = []
     for i, card in enumerate(cards, 1):
@@ -437,17 +439,15 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
     nav_buttons = []
     if page > 1:
-        nav_buttons.append(InlineKeyboardButton("First↩️", callback_data=f"page_1_{filter_type or ''}"))
-        nav_buttons.append(InlineKeyboardButton("Back⬅️", callback_data=f"page_{page - 1}_{filter_type or ''}"))
+        nav_buttons.append(InlineKeyboardButton("◀️ Back", callback_data=f"page_{page - 1}_{filter_type or ''}"))
     if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton("Next➡️", callback_data=f"page_{page + 1}_{filter_type or ''}"))
-        nav_buttons.append(InlineKeyboardButton("Last↪️", callback_data=f"page_{total_pages}_{filter_type or ''}"))
+        nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"page_{page + 1}_{filter_type or ''}"))
     if nav_buttons:
         keyboard.append(nav_buttons)
 
     keyboard.append([
         InlineKeyboardButton("💰 Deposit", callback_data="deposit"),
-        InlineKeyboardButton("Refresh🔂", callback_data=f"refresh_{page}_{filter_type or ''}"),
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{page}_{filter_type or ''}"),
         InlineKeyboardButton("🔍 Filters", callback_data="show_filters")
     ])
 
@@ -481,7 +481,7 @@ async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ WARNING:\n"
         "- Deposits below the minimum amount will not be processed.\n"
         "- This address is valid only for your account. Do not share it.\n\n"
-        "⚠️ Note: This deposit session is only active for 30 minutes. Please send your deposit before it expires."
+        "⚠️ Note: This deposit session is only active for 30 minutes."
     )
 
     if update.callback_query:
@@ -511,7 +511,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             amount = float(update.message.text.strip())
             if amount < 15:
-                await update.message.reply_text("Minimum deposit is 15 TON. Please enter the correct amount like that 15, 16, 20")
+                await update.message.reply_text("Minimum deposit is 15 TON. Please enter the correct amount like 15, 16, 20")
                 return
 
             user_id = update.effective_user.id
@@ -520,7 +520,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             context.user_data['awaiting_deposit_amount'] = False
             context.user_data['awaiting_txid'] = True
-            await update.message.reply_text("Submit withdraw Txid :")
+            await update.message.reply_text("Submit your Txid:")
 
         except ValueError:
             await update.message.reply_text("Please enter a valid number")
@@ -539,20 +539,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         order_text = (
             f"⚡ ORDER DETAILS ⚡\n\n"
-            f"NAME: `{user.first_name}`\n"
-            f"ID: `{user.user_id}`\n"
-            f"AMOUNT: `{amount}` TON\n"
-            f"Txid: `{txid}`\n"
-            f"Order Number: `{order_number}`\n"
+            f"NAME: {user.first_name}\n"
+            f"ID: {user.user_id}\n"
+            f"AMOUNT: {amount} TON\n"
+            f"Txid: {txid}\n"
+            f"Order Number: {order_number}\n"
             f"Stats: Waiting...\n"
-            f"TIME: `{current_time}`\n\n"
+            f"TIME: {current_time}\n\n"
             "NOTE: Balance will be added within 1/2 minutes. If not added, contact customer care."
         )
 
         keyboard = [[InlineKeyboardButton("✆ Contact", url="https://t.me/Vanilagcm")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        message = await update.message.reply_text(order_text, parse_mode='Markdown', reply_markup=reply_markup)
+        message = await update.message.reply_text(order_text, reply_markup=reply_markup)
 
         asyncio.create_task(update_order_status(context, message.chat_id, message.message_id, order_text))
 
@@ -561,16 +561,16 @@ async def update_order_status(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
     await asyncio.sleep(50)
     processing_text = original_text.replace("Stats: Waiting...", "Stats: Processing....")
     try:
-        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=processing_text, parse_mode='Markdown')
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=processing_text)
     except Exception as e:
-        logger.error(f"Error editing message to Processing: {e}")
+        logger.error(f"Error: {e}")
 
     await asyncio.sleep(55)
     failed_text = processing_text.replace("Stats: Processing....", "Stats: transaction could not be found.")
     try:
-        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=failed_text, parse_mode='Markdown')
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=failed_text)
     except Exception as e:
-        logger.error(f"Error editing message to failed: {e}")
+        logger.error(f"Error: {e}")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -647,98 +647,55 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("card_"):
         card_num = data.replace("card_", "")
-        await query.answer(f"✅ Copied: {card_num}", show_alert=False)
+        await query.answer(f"✅ Copied: {card_num}", show_alert=True)
 
 
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
-    last_cards_text = '\n  '.join(['• No cards purchased yet.'] if not user.purchased_cards else [f'• {c}' for c in user.purchased_cards[-3:]])
     profile_text = (
         f"⚡ Vanilla prepaid PROFILE ⚡\n\n"
         f"👤 {user.first_name}\n"
-        f"🧠 It is impossible to love and to be wise.\n"
-        f"💬 By: Francis Bacon\n\n"
-        f"🆔 User ID: {user.user_id}\n"
+        f"🆔 ID: {user.user_id}\n"
         f"🔹 Username: @{user.username}\n"
         f"💰 TON Balance: {user.ton_balance:.10f}\n"
-        f"💵 USD Total: ${user.usd_balance:.2f}\n\n"
-        f"📥 Deposits\n"
-        f"• Total: {user.total_deposits_ton:.4f} Ton\n"
-        f"• USD: ${user.total_deposits_usd:.2f}\n"
-        f"• Last: {user.last_deposit}\n\n"
-        f"🛒 Purchases\n"
-        f"• Count: {user.purchase_count}\n"
-        f"• USD Spent: ${user.usd_spent:.2f}\n"
-        f"• Last Cards:\n  {last_cards_text}\n\n"
-        f"👥 Referrals\n"
-        f"• Invited: {user.referrals_count}\n"
-        f"• Referred By: {user.referred_by}\n\n"
-        f"🛠 Permissions\n"
-        f"• Vendor: ❌\n"
-        f"• Re-list: ❌\n\n"
-        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        f"💵 USD Balance: ${user.usd_balance:.2f}\n\n"
+        f"📥 Total Deposits: {user.total_deposits_ton:.4f} TON\n"
+        f"🛒 Purchases: {user.purchase_count}\n"
+        f"👥 Referrals: {user.referrals_count}\n"
+        f"🔗 Referral Link: {user.referral_link}"
     )
     await update.message.reply_text(profile_text)
 
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
-    await update.message.reply_text(f"Your current balance: {user.ton_balance:.2f} TON")
+    await update.message.reply_text(f"Your balance: {user.ton_balance:.2f} TON")
 
 
 async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
-    text = (
-        f"Your balance : {user.ton_balance:.5f} TON\n"
-        f"Withdrawal amount : 0.0000 TON\n"
-        f"Withdrawal fee : 0.01%"
-    )
+    text = f"Your balance: {user.ton_balance:.5f} TON\nWithdrawal fee: 0.01%"
     await update.message.reply_text(text, reply_markup=keyboard_builder.get_withdraw_keyboard())
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("If you need help, please contact https://t.me/Vanilagcm")
+    await update.message.reply_text("Contact: https://t.me/Vanilagcm")
 
 
 async def refund_rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rules = (
-        "⚡️⚡️⚡️ VERY IMPORTANT ⚡️⚡️⚡️\n"
-        "💳 Vanilla prepaid – Refund Policy 💳\n\n"
-        "✅✅✅ CARD REFUND REQUIREMENTS ✅✅✅\n"
-        "1️⃣ Refund requests must be submitted within 25 minutes of purchase.\n"
-        "2️⃣ Refunds are accepted ONLY if the card is stolen or partially used.\n"
-        "3️⃣ You must have a valid Telegram username set.\n\n"
-        "💬 Official Refund Support: https://t.me/Vanilagcm\n\n"
-        "❌❌❌ AUTOMATIC REFUND REJECTIONS ❌❌❌\n"
-        "🚫 No refund for ReListed cards\n"
-        "🚫 No refund for cards used with Google / Google Pay\n"
-        "🚫 No Telegram username = Auto rejection\n\n"
-        "⚠️ IMPORTANT NOTICE: All cards are checked immediately before delivery\n"
-        "📩 Need help? Contact support: https://t.me/VANILAExchange"
-    )
+    rules = "Refund Policy: Contact support within 25 minutes of purchase."
     await update.message.reply_text(rules)
 
 
 async def ref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
-    text = (
-        f"🎉 REFERRAL PROGRAM\n\n"
-        f"Invite friends and earn 5% every deposit each active referral!\n\n"
-        f"🔗 Your unique link: {user.referral_link}\n\n"
-        f"📊 Stats\n"
-        f"• Total referrals: {user.referrals_count}\n"
-        f"• Earned: $0.00\n\n"
-        f"❗ Rules\n"
-        f"- Bonus awarded when referral completes first transaction\n"
-        f"- No self-referrals\n"
-        f"- Fraudulent referrals will be banned"
-    )
+    text = f"Your referral link: {user.referral_link}\nTotal referrals: {user.referrals_count}"
     await update.message.reply_text(text)
 
 
 async def cents_listing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_update_time():
-        await update.message.reply_text("The bot is currently updating, please wait")
+        await update.message.reply_text("Updating, please wait")
         return
     if not card_generator.cards:
         await card_generator.update_cards()
@@ -753,14 +710,15 @@ async def scheduled_update(context: ContextTypes.DEFAULT_TYPE):
 async def auto_mark_out_of_stock(context: ContextTypes.DEFAULT_TYPE):
     if not card_generator.cards:
         return
-    count = card_generator.mark_random_cards_out_of_stock(1.0)
-    if count and count > 0:
-        print(f"Auto OUT OF STOCK: {count} cards marked at {datetime.now()}")
+    card_generator.mark_random_cards_out_of_stock(1.0)
 
 
 async def main():
     print("Starting bot...")
-
+    
+    if BOT_TOKEN == "DUMMY_TOKEN_FOR_RENDER":
+        print("WARNING: Using dummy token! Set BOT_TOKEN environment variable.")
+    
     await card_generator.update_cards()
     print(f"Bot started with {len(card_generator.cards)} cards")
 
@@ -783,7 +741,6 @@ async def main():
     if application.job_queue:
         interval = 3600
         application.job_queue.run_repeating(auto_mark_out_of_stock, interval=interval, first=interval)
-        print(f"Auto OUT OF STOCK scheduled every {interval // 60} minutes (1% per hour)")
         application.job_queue.run_daily(scheduled_update, time=time(hour=3, minute=0, second=0))
 
     print("Starting polling...")
